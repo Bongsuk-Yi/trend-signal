@@ -343,8 +343,32 @@ def collect_market():
 # 4) 부동산 실거래 (공공데이터포털)
 # ----------------------------------------------------------------------------
 
-RE_ENDPOINT = ("https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/"
-               "getRTMSDataSvcAptTradeDev")
+RE_PATH = "1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev"
+
+# GitHub Actions 러너에서 data.go.kr 로의 TLS 핸드셰이크가 막히는 경우가 있어
+# https → http 순으로 시도한다. 처음 성공한 스킴을 이후 지역에도 재사용.
+RE_BASES = [
+    f"https://apis.data.go.kr/{RE_PATH}",
+    f"http://apis.data.go.kr/{RE_PATH}",
+]
+_re_base_ok = None
+
+
+def re_fetch(qs):
+    """부동산 API 호출. 동작하는 스킴을 찾아 기억한다."""
+    global _re_base_ok
+    bases = [_re_base_ok] if _re_base_ok else RE_BASES
+    last = None
+    for base in bases:
+        try:
+            raw = fetch(f"{base}?{qs}", timeout=12, retries=0)
+            if _re_base_ok is None:
+                _re_base_ok = base
+                print(f"        (연결 성공 스킴: {base.split(':')[0]})")
+            return raw
+        except Exception as e:  # noqa: BLE001
+            last = e
+    raise last
 
 
 def collect_realestate(service_key):
@@ -368,8 +392,7 @@ def collect_realestate(service_key):
                 "numOfRows": "200",
                 "pageNo": "1",
             }, safe="%")
-            # 죽은 API에 매일 몇 분씩 묶이지 않도록 짧게 끊는다
-            raw = fetch(f"{RE_ENDPOINT}?{qs}", timeout=12, retries=0)
+            raw = re_fetch(qs)
             root = ET.fromstring(raw)
 
             # 공공데이터포털은 에러도 HTTP 200 + XML 본문으로 돌려준다
@@ -421,6 +444,18 @@ def collect_realestate(service_key):
             regions.append({"code": code, "name": name, "count": 0,
                             "error": str(e)[:100]})
             print(f"        {name}: 실패 - {str(e)[:70]}")
+
+            # 첫 지역이 모든 스킴에서 실패하면 서버 자체가 안 닿는 것이다.
+            # 남은 지역까지 타임아웃을 기다리며 몇 분을 버리지 않는다.
+            if _re_base_ok is None and len(regions) == 1:
+                skipped = [n for c, n in list(REGION_CODES.items())[1:]]
+                for c, n in list(REGION_CODES.items())[1:]:
+                    regions.append({"code": c, "name": n, "count": 0,
+                                    "error": "앞 지역 연결 실패로 건너뜀"})
+                if skipped:
+                    print(f"        나머지 {len(skipped)}개 지역 건너뜀 "
+                          f"(서버 연결 불가)")
+                break
 
     return {"month": ym, "regions": regions, "errors": errors}, errors
 
