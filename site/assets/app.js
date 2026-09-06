@@ -230,6 +230,32 @@
       return;
     }
 
+    if (re.unreachable) {
+      const n = el('div', 'notice');
+      n.append(document.createTextNode(
+        '국토교통부 실거래가 API(data.go.kr)가 이 사이트를 빌드하는 GitHub 서버에서 차단되어 있습니다. ' +
+        '한국 IP에서는 정상 응답하므로 서비스키 문제가 아니라 접속 지역 제한입니다. ' +
+        '한국에서 실행되는 러너로 수집하면 해결됩니다.'));
+      box.append(n);
+      return;
+    }
+
+    const sum = el('div', 'stats');
+    const tiles = [
+      ['이번 달 거래', nf(re.total_count || 0), '건'],
+      ['거래 있는 지역', nf(re.active_count || 0), `/ ${nf(re.region_count || 0)}`],
+      ['평균 거래가', nf(Math.round((re.avg_amount || 0) / 10000), 1), '억'],
+    ];
+    for (const [k, v, u] of tiles) {
+      const s = el('div', 'stat');
+      s.append(el('div', 'k', k));
+      const val = el('div', 'v', v);
+      val.append(el('span', 'u', u));
+      s.append(val);
+      sum.append(s);
+    }
+    box.append(sum);
+
     const g = el('div', 're-grid');
     for (const r of re.regions || []) {
       const c = el('div', 're');
