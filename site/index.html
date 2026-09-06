@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<title>Trend Signal</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<!-- ── 비밀번호 게이트 ───────────────────────────────── -->
+<div id="gate" class="gate">
+  <form class="gate-box" id="gate-form" autocomplete="on">
+    <div class="gate-mark">📡</div>
+    <h1>Trend Signal</h1>
+    <p class="gate-sub">데이터는 암호화되어 있습니다. 비밀번호를 입력하세요.</p>
+    <input type="password" id="pw" placeholder="비밀번호" autocomplete="current-password" required>
+    <label class="gate-remember">
+      <input type="checkbox" id="remember" checked> 이 브라우저에 기억
+    </label>
+    <button type="submit" id="unlock">열기</button>
+    <p class="gate-err" id="gate-err" hidden></p>
+    <p class="gate-note">복호화는 브라우저에서만 이루어집니다. 비밀번호는 어디로도 전송되지 않습니다.</p>
+  </form>
+</div>
+
+<!-- ── 대시보드 ─────────────────────────────────────── -->
+<div id="app" hidden>
+
+  <header class="topbar">
+    <div class="topbar-in">
+      <div class="brand"><span class="dot"></span> TREND SIGNAL</div>
+      <nav class="nav">
+        <a href="#brief">브리프</a>
+        <a href="#market">시장</a>
+        <a href="#trends">급상승</a>
+        <a href="#cross">키워드분석</a>
+        <a href="#timeline">뉴스</a>
+        <a href="#realestate">부동산</a>
+      </nav>
+      <div class="meta">
+        <span id="updated">—</span>
+        <button id="lock" class="lock" title="잠그기">잠금</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- 브리프 -->
+    <section id="brief" class="sec">
+      <div class="sec-head"><h2>오늘의 시그널</h2><span class="sec-tag">TODAY'S BRIEF</span></div>
+      <div class="stats" id="brief-stats"></div>
+      <div class="brief-grid">
+        <div class="panel">
+          <h3>최근 6시간 신규 급상승</h3>
+          <div class="chips" id="brief-fresh"></div>
+        </div>
+        <div class="panel accent">
+          <h3>선행 신호 <small>검색은 급증, 보도는 아직</small></h3>
+          <div class="chips" id="brief-leading"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 시장지표 -->
+    <section id="market" class="sec">
+      <div class="sec-head"><h2>시장지표</h2><span class="sec-tag">MARKET</span></div>
+      <div class="market-grid" id="market-grid"></div>
+    </section>
+
+    <!-- 급상승 -->
+    <section id="trends" class="sec">
+      <div class="sec-head"><h2>구글 급상승 검색어</h2><span class="sec-tag">GOOGLE TRENDS · KR</span></div>
+      <div class="trend-grid" id="trend-grid"></div>
+    </section>
+
+    <!-- 교차 분석 -->
+    <section id="cross" class="sec">
+      <div class="sec-head">
+        <h2>키워드 × 뉴스 교차 분석</h2><span class="sec-tag">KEYWORD ANALYSIS</span>
+      </div>
+      <p class="sec-desc">급상승 검색어가 실제 기사로 얼마나 번졌는지 대조합니다. 검색만 튀고 보도가 없는 키워드가 가장 이른 신호입니다.</p>
+      <div class="cross-list" id="cross-list"></div>
+    </section>
+
+    <!-- 지속 키워드 -->
+    <section id="persistent" class="sec">
+      <div class="sec-head"><h2>지속 관심 키워드</h2><span class="sec-tag">7일 누적</span></div>
+      <div class="chips lg" id="persistent-list"></div>
+    </section>
+
+    <!-- 토픽 클러스터 -->
+    <section id="clusters" class="sec">
+      <div class="sec-head"><h2>지금 화제인 이슈</h2><span class="sec-tag">TOPIC CLUSTERS</span></div>
+      <div class="cluster-grid" id="cluster-grid"></div>
+    </section>
+
+    <!-- 뉴스 타임라인 -->
+    <section id="timeline" class="sec">
+      <div class="sec-head"><h2>뉴스 타임라인</h2><span class="sec-tag">24H</span></div>
+      <div class="timeline" id="timeline-list"></div>
+    </section>
+
+    <!-- 부동산 -->
+    <section id="realestate" class="sec">
+      <div class="sec-head"><h2>부동산 실거래</h2><span class="sec-tag">국토교통부</span></div>
+      <div id="re-body"></div>
+    </section>
+
+    <!-- 소스 상태 -->
+    <section id="sources" class="sec">
+      <div class="sec-head"><h2>데이터 소스 상태</h2><span class="sec-tag">HEALTH</span></div>
+      <div class="src-grid" id="src-grid"></div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <p>개인 사용 목적의 트렌드 모니터. 원본 데이터의 권리는 각 출처에 있으며, 각 항목은 원문으로 링크됩니다.</p>
+    <p class="foot-dim" id="foot-meta"></p>
+  </footer>
+</div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
