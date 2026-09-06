@@ -348,7 +348,11 @@ RE_ENDPOINT = ("https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/"
 
 
 def collect_realestate(service_key):
-    """국토교통부 아파트 매매 실거래가. serviceKey 없으면 None 반환."""
+    """국토교통부 아파트 매매 실거래가. serviceKey 없으면 None 반환.
+
+    이 API는 응답이 느리고, 활용신청 직후에는 키가 아직 활성화되지 않아
+    빈 응답이나 에러 코드를 돌려준다. 어느 쪽인지 로그에 그대로 남긴다.
+    """
     if not service_key:
         return None, ["서비스키 없음 (DATA_GO_KR_KEY 시크릿 미설정)"]
 
@@ -364,8 +368,21 @@ def collect_realestate(service_key):
                 "numOfRows": "200",
                 "pageNo": "1",
             }, safe="%")
-            raw = fetch(f"{RE_ENDPOINT}?{qs}", timeout=20, retries=1)
+            # 죽은 API에 매일 몇 분씩 묶이지 않도록 짧게 끊는다
+            raw = fetch(f"{RE_ENDPOINT}?{qs}", timeout=12, retries=0)
             root = ET.fromstring(raw)
+
+            # 공공데이터포털은 에러도 HTTP 200 + XML 본문으로 돌려준다
+            msg = root.findtext(".//returnAuthMsg") or ""
+            code_msg = root.findtext(".//resultMsg") or root.findtext(".//errMsg") or ""
+            result_code = (root.findtext(".//resultCode") or "").strip()
+            if msg or (result_code and result_code not in ("00", "0")):
+                detail = (msg or code_msg or f"resultCode={result_code}").strip()
+                errors.append(f"{name}: API 응답 - {detail[:100]}")
+                regions.append({"code": code, "name": name, "count": 0,
+                                "error": detail[:100]})
+                print(f"        {name}: 실패 - {detail[:70]}")
+                continue
 
             deals = []
             for item in root.iter("item"):
@@ -395,12 +412,17 @@ def collect_realestate(service_key):
                     "max_deal": max(deals, key=lambda d: d["amount"]),
                     "recent": sorted(deals, key=lambda d: d["day"], reverse=True)[:5],
                 })
+                print(f"        {name}: {len(deals)}건")
             else:
                 regions.append({"code": code, "name": name, "count": 0})
+                print(f"        {name}: 0건 (이번 달 거래 없음 또는 빈 응답)")
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {str(e)[:80]}")
+            regions.append({"code": code, "name": name, "count": 0,
+                            "error": str(e)[:100]})
+            print(f"        {name}: 실패 - {str(e)[:70]}")
 
-    return {"month": ym, "regions": regions}, errors
+    return {"month": ym, "regions": regions, "errors": errors}, errors
 
 
 # ----------------------------------------------------------------------------
@@ -537,8 +559,15 @@ def main():
 
     print("[4/4] 부동산 실거래…")
     realestate, re_err = collect_realestate(os.environ.get("DATA_GO_KR_KEY", "").strip())
-    sources["realestate"] = {"ok": realestate is not None, "errors": re_err}
-    print(f"      → {'수집됨' if realestate else '생략'}")
+    # '키가 있다'가 아니라 '실제로 거래 데이터가 들어왔다'를 정상으로 본다
+    re_total = sum(r.get("count", 0) for r in (realestate or {}).get("regions", []))
+    sources["realestate"] = {"ok": re_total > 0, "count": re_total, "errors": re_err}
+    if realestate is None:
+        print("      → 생략 (서비스키 없음)")
+    elif re_total:
+        print(f"      → 총 {re_total}건")
+    else:
+        print("      → 데이터 없음 (키 활성화 대기 중이거나 이번 달 거래 없음)")
 
     cross = cross_analyze(trends, articles)
     history, persistent = update_history(previous, trends)
