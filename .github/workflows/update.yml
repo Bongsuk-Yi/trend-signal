@@ -2,7 +2,6 @@ name: Update and Deploy
 
 on:
   schedule:
-    # 매일 오전 7시 30분 KST (= 22:30 UTC 전날)
     - cron: "30 22 * * *"
   workflow_dispatch:
   push:
@@ -44,7 +43,7 @@ jobs:
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
         run: |
           if [ -f site/data/latest.enc.json ]; then
-            python scripts/build.py decrypt site/data/latest.enc.json build/prev.json || true
+            python scripts/crypt.py decrypt site/data/latest.enc.json build/prev.json || true
           else
             echo "No previous data - first run"
           fi
@@ -53,13 +52,13 @@ jobs:
         env:
           PREV_JSON: build/prev.json
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
-        run: python scripts/build.py collect build/latest.json
+        run: python scripts/collect.py build/latest.json
 
       - name: Encrypt
         env:
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
         run: |
-          python scripts/build.py encrypt build/latest.json site/data/latest.enc.json
+          python scripts/crypt.py encrypt build/latest.json site/data/latest.enc.json
           rm -rf build
 
       - name: Commit data
