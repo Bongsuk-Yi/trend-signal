@@ -13,6 +13,7 @@ Trend Dashboard - 데이터 수집기
 실패한 소스는 payload["sources"] 에 상태만 기록되고 나머지는 정상 갱신된다.
 """
 
+import concurrent.futures
 import json
 import os
 import re
@@ -35,11 +36,31 @@ TIMEOUT = 20
 
 # 부동산 조회 지역 (법정동 코드 5자리). 원하는 지역으로 바꾸면 된다.
 REGION_CODES = {
-    "11110": "서울 종로구",
-    "11680": "서울 강남구",
-    "11710": "서울 송파구",
-    "41135": "성남 분당구",
-    "41465": "용인 수지구",
+    # ── 서울특별시 25개 자치구 ──
+    "11110": "서울 종로구", "11140": "서울 중구", "11170": "서울 용산구",
+    "11200": "서울 성동구", "11215": "서울 광진구", "11230": "서울 동대문구",
+    "11260": "서울 중랑구", "11290": "서울 성북구", "11305": "서울 강북구",
+    "11320": "서울 도봉구", "11350": "서울 노원구", "11380": "서울 은평구",
+    "11410": "서울 서대문구", "11440": "서울 마포구", "11470": "서울 양천구",
+    "11500": "서울 강서구", "11530": "서울 구로구", "11545": "서울 금천구",
+    "11560": "서울 영등포구", "11590": "서울 동작구", "11620": "서울 관악구",
+    "11650": "서울 서초구", "11680": "서울 강남구", "11710": "서울 송파구",
+    "11740": "서울 강동구",
+    # ── 경기도 ──
+    "41111": "수원 장안구", "41113": "수원 권선구", "41115": "수원 팔달구",
+    "41117": "수원 영통구",
+    "41131": "성남 수정구", "41133": "성남 중원구", "41135": "성남 분당구",
+    "41150": "의정부시",
+    "41171": "안양 만안구", "41173": "안양 동안구",
+    "41190": "부천시", "41210": "광명시", "41220": "평택시", "41250": "동두천시",
+    "41271": "안산 상록구", "41273": "안산 단원구",
+    "41281": "고양 덕양구", "41285": "고양 일산동구", "41287": "고양 일산서구",
+    "41290": "과천시", "41310": "구리시", "41360": "남양주시", "41370": "오산시",
+    "41390": "시흥시", "41410": "군포시", "41430": "의왕시", "41450": "하남시",
+    "41461": "용인 처인구", "41463": "용인 기흥구", "41465": "용인 수지구",
+    "41480": "파주시", "41500": "이천시", "41550": "안성시", "41570": "김포시",
+    "41590": "화성시", "41610": "광주시", "41630": "양주시", "41650": "포천시",
+    "41670": "여주시", "41800": "연천군", "41820": "가평군", "41830": "양평군",
 }
 
 NEWS_FEEDS = [
@@ -371,93 +392,122 @@ def re_fetch(qs):
     raise last
 
 
-def collect_realestate(service_key):
-    """국토교통부 아파트 매매 실거래가. serviceKey 없으면 None 반환.
+def _re_query(service_key, code, ym):
+    return urllib.parse.urlencode({
+        "serviceKey": service_key,
+        "LAWD_CD": code,
+        "DEAL_YMD": ym,
+        "numOfRows": "300",
+        "pageNo": "1",
+    }, safe="%")
 
-    이 API는 응답이 느리고, 활용신청 직후에는 키가 아직 활성화되지 않아
-    빈 응답이나 에러 코드를 돌려준다. 어느 쪽인지 로그에 그대로 남긴다.
+
+def _re_parse(raw, code, name):
+    """XML 응답 → 지역 요약. API 에러면 error 키를 담아 돌려준다."""
+    root = ET.fromstring(raw)
+
+    # 공공데이터포털은 에러도 HTTP 200 + XML 본문으로 돌려준다
+    msg = root.findtext(".//returnAuthMsg") or ""
+    code_msg = root.findtext(".//resultMsg") or root.findtext(".//errMsg") or ""
+    result_code = (root.findtext(".//resultCode") or "").strip()
+    if msg or (result_code and result_code not in ("00", "0")):
+        detail = (msg or code_msg or f"resultCode={result_code}").strip()
+        return {"code": code, "name": name, "count": 0, "error": detail[:100]}
+
+    deals = []
+    for item in root.iter("item"):
+        def g(tag):
+            v = item.findtext(tag)
+            return v.strip() if v else ""
+        amount = re.sub(r"[^\d]", "", g("dealAmount"))
+        if not amount:
+            continue
+        area = g("excluUseAr")
+        deals.append({
+            "apt": g("aptNm") or g("aptName"),
+            "dong": g("umdNm"),
+            "amount": int(amount),                    # 만원
+            "area": float(area) if area else 0.0,     # ㎡
+            "floor": g("floor"),
+            "day": g("dealDay"),
+        })
+
+    if not deals:
+        return {"code": code, "name": name, "count": 0}
+
+    amounts = [d["amount"] for d in deals]
+    return {
+        "code": code,
+        "name": name,
+        "count": len(deals),
+        "avg_amount": round(sum(amounts) / len(amounts)),
+        "max_deal": max(deals, key=lambda d: d["amount"]),
+        "recent": sorted(deals, key=lambda d: d["day"], reverse=True)[:5],
+    }
+
+
+def collect_realestate(service_key):
+    """국토교통부 아파트 매매 실거래가 (서울 전역 + 경기 전역).
+
+    지역이 많으므로 병렬로 가져온다. 다만 data.go.kr 은 해외 IP를 막는 일이
+    있어서, 먼저 한 지역으로 연결을 확인(probe)하고 실패하면 즉시 접는다.
+    수십 개 지역의 타임아웃을 기다리며 몇 분을 버리지 않기 위해서다.
     """
     if not service_key:
         return None, ["서비스키 없음 (DATA_GO_KR_KEY 시크릿 미설정)"]
 
     ym = datetime.now(KST).strftime("%Y%m")
-    regions, errors = [], []
+    items = list(REGION_CODES.items())
 
-    for code, name in REGION_CODES.items():
+    # ── 1) 연결 확인 ──
+    probe_code, probe_name = items[0]
+    try:
+        raw = re_fetch(_re_query(service_key, probe_code, ym))
+    except Exception as e:  # noqa: BLE001
+        note = (f"data.go.kr 연결 불가 ({str(e)[:50]}) — "
+                f"실행 서버의 IP가 차단된 것으로 보임")
+        print(f"        {note}")
+        print(f"        {len(items)}개 지역 전부 건너뜀")
+        return ({"month": ym, "regions": [], "region_count": 0,
+                 "total_count": 0, "unreachable": True, "errors": [note]},
+                [note])
+
+    regions = [_re_parse(raw, probe_code, probe_name)]
+
+    # ── 2) 나머지 지역 병렬 수집 ──
+    def one(pair):
+        code, name = pair
         try:
-            qs = urllib.parse.urlencode({
-                "serviceKey": service_key,
-                "LAWD_CD": code,
-                "DEAL_YMD": ym,
-                "numOfRows": "200",
-                "pageNo": "1",
-            }, safe="%")
-            raw = re_fetch(qs)
-            root = ET.fromstring(raw)
-
-            # 공공데이터포털은 에러도 HTTP 200 + XML 본문으로 돌려준다
-            msg = root.findtext(".//returnAuthMsg") or ""
-            code_msg = root.findtext(".//resultMsg") or root.findtext(".//errMsg") or ""
-            result_code = (root.findtext(".//resultCode") or "").strip()
-            if msg or (result_code and result_code not in ("00", "0")):
-                detail = (msg or code_msg or f"resultCode={result_code}").strip()
-                errors.append(f"{name}: API 응답 - {detail[:100]}")
-                regions.append({"code": code, "name": name, "count": 0,
-                                "error": detail[:100]})
-                print(f"        {name}: 실패 - {detail[:70]}")
-                continue
-
-            deals = []
-            for item in root.iter("item"):
-                def g(tag):
-                    v = item.findtext(tag)
-                    return v.strip() if v else ""
-                amount = re.sub(r"[^\d]", "", g("dealAmount"))
-                if not amount:
-                    continue
-                area = g("excluUseAr")
-                deals.append({
-                    "apt": g("aptNm") or g("aptName"),
-                    "dong": g("umdNm"),
-                    "amount": int(amount),                    # 만원
-                    "area": float(area) if area else 0.0,     # ㎡
-                    "floor": g("floor"),
-                    "day": g("dealDay"),
-                })
-
-            if deals:
-                amounts = [d["amount"] for d in deals]
-                regions.append({
-                    "code": code,
-                    "name": name,
-                    "count": len(deals),
-                    "avg_amount": round(sum(amounts) / len(amounts)),
-                    "max_deal": max(deals, key=lambda d: d["amount"]),
-                    "recent": sorted(deals, key=lambda d: d["day"], reverse=True)[:5],
-                })
-                print(f"        {name}: {len(deals)}건")
-            else:
-                regions.append({"code": code, "name": name, "count": 0})
-                print(f"        {name}: 0건 (이번 달 거래 없음 또는 빈 응답)")
+            return _re_parse(re_fetch(_re_query(service_key, code, ym)), code, name)
         except Exception as e:  # noqa: BLE001
-            errors.append(f"{name}: {str(e)[:80]}")
-            regions.append({"code": code, "name": name, "count": 0,
-                            "error": str(e)[:100]})
-            print(f"        {name}: 실패 - {str(e)[:70]}")
+            return {"code": code, "name": name, "count": 0, "error": str(e)[:100]}
 
-            # 첫 지역이 모든 스킴에서 실패하면 서버 자체가 안 닿는 것이다.
-            # 남은 지역까지 타임아웃을 기다리며 몇 분을 버리지 않는다.
-            if _re_base_ok is None and len(regions) == 1:
-                skipped = [n for c, n in list(REGION_CODES.items())[1:]]
-                for c, n in list(REGION_CODES.items())[1:]:
-                    regions.append({"code": c, "name": n, "count": 0,
-                                    "error": "앞 지역 연결 실패로 건너뜀"})
-                if skipped:
-                    print(f"        나머지 {len(skipped)}개 지역 건너뜀 "
-                          f"(서버 연결 불가)")
-                break
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        regions.extend(pool.map(one, items[1:]))
 
-    return {"month": ym, "regions": regions, "errors": errors}, errors
+    errors = [f"{r['name']}: {r['error']}" for r in regions if r.get("error")]
+    total = sum(r["count"] for r in regions)
+    with_deals = [r for r in regions if r["count"]]
+    with_deals.sort(key=lambda r: r["count"], reverse=True)
+
+    print(f"        거래 있는 지역 {len(with_deals)}개 / 조회 {len(regions)}개"
+          f" · 총 {total}건" + (f" · 실패 {len(errors)}개" if errors else ""))
+    for r in with_deals[:5]:
+        print(f"          {r['name']}: {r['count']}건")
+
+    avg = (round(sum(r["avg_amount"] * r["count"] for r in with_deals) / total)
+           if total else 0)
+
+    return ({
+        "month": ym,
+        "regions": with_deals[:15],       # 표시용 상위 15개 지역
+        "region_count": len(regions),
+        "active_count": len(with_deals),
+        "total_count": total,
+        "avg_amount": avg,
+        "unreachable": False,
+        "errors": errors[:10],
+    }, errors)
 
 
 # ----------------------------------------------------------------------------
