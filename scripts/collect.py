@@ -415,7 +415,7 @@ def _re_parse(raw, code, name):
     msg = root.findtext(".//returnAuthMsg") or ""
     code_msg = root.findtext(".//resultMsg") or root.findtext(".//errMsg") or ""
     result_code = (root.findtext(".//resultCode") or "").strip()
-    if msg or (result_code and result_code not in ("00", "0")):
+    if msg or (result_code and result_code.lstrip("0") != ""):
         detail = (msg or code_msg or f"resultCode={result_code}").strip()
         return {"code": code, "name": name, "count": 0, "error": f"[rc={result_code}] {detail}"[:150]}
 
@@ -461,7 +461,10 @@ def collect_realestate(service_key):
     if not service_key:
         return None, ["서비스키 없음 (DATA_GO_KR_KEY 시크릿 미설정)"]
 
-    ym = datetime.now(KST).strftime("%Y%m")
+    # 실거래 신고는 계약 후 최대 30일까지 걸리므로, 이번 달은 월초일수록 거의 항상
+    # 0건으로 보인다. 신고가 어느 정도 쌓인 '지난달'을 기준으로 조회한다.
+    _last_month_last_day = datetime.now(KST).replace(day=1) - timedelta(days=1)
+    ym = _last_month_last_day.strftime("%Y%m")
     items = list(REGION_CODES.items())
 
     # ── 1) 연결 확인 ──
