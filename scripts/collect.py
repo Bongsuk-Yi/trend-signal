@@ -27,6 +27,11 @@ import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
+# Windows self-hosted 러너의 콘솔 인코딩이 UTF-8이 아니면 한글 print()가 GitHub Actions 로그에서 깨진다
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 KST = timezone(timedelta(hours=9))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -412,7 +417,7 @@ def _re_parse(raw, code, name):
     result_code = (root.findtext(".//resultCode") or "").strip()
     if msg or (result_code and result_code not in ("00", "0")):
         detail = (msg or code_msg or f"resultCode={result_code}").strip()
-        return {"code": code, "name": name, "count": 0, "error": detail[:100]}
+        return {"code": code, "name": name, "count": 0, "error": f"[rc={result_code}] {detail}"[:150]}
 
     deals = []
     for item in root.iter("item"):
@@ -473,6 +478,8 @@ def collect_realestate(service_key):
                 [note])
 
     regions = [_re_parse(raw, probe_code, probe_name)]
+    if regions[0].get("error"):
+        print(f"        [디버그] 원본 응답: {raw[:300]}")
 
     # ── 2) 나머지 지역 병렬 수집 ──
     def one(pair):
