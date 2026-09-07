@@ -655,7 +655,9 @@ def main():
     print("[4/4] 부동산 실거래…")
     realestate, re_err = collect_realestate(os.environ.get("DATA_GO_KR_KEY", "").strip())
     # '키가 있다'가 아니라 '실제로 거래 데이터가 들어왔다'를 정상으로 본다
-    re_total = sum(r.get("count", 0) for r in (realestate or {}).get("regions", []))
+    # realestate["regions"] 은 표시용 상위 15개뿐이라 여기서 합산하면 과소평가된다.
+    # 전체 합계는 collect_realestate() 가 이미 계산해 total_count 에 담아 돌려준다.
+    re_total = (realestate or {}).get("total_count", 0)
     sources["realestate"] = {"ok": re_total > 0, "count": re_total, "errors": re_err}
     if realestate is None:
         print("      → 생략 (서비스키 없음)")
