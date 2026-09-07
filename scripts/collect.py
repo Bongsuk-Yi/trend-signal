@@ -653,6 +653,8 @@ def main():
         print(f"      → 총 {re_total}건")
     else:
         print("      → 데이터 없음 (키 활성화 대기 중이거나 이번 달 거래 없음)")
+        if re_err:
+            print(f"      → 원인 예시: {re_err[0]}")
 
     cross = cross_analyze(trends, articles)
     history, persistent = update_history(previous, trends)
